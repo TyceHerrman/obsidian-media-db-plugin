@@ -3,6 +3,7 @@ import { Plugin, TFolder } from 'obsidian';
 import { APIManager } from 'packages/obsidian/src/api/APIManager';
 import { BoardGameGeekAPI } from 'packages/obsidian/src/api/apis/BoardGameGeekAPI';
 import { ComicVineAPI } from 'packages/obsidian/src/api/apis/ComicVineAPI';
+import { HardcoverAPI } from 'packages/obsidian/src/api/apis/HardcoverAPI';
 import { IGDBAPI } from 'packages/obsidian/src/api/apis/IGDBAPI';
 import { MALAPI } from 'packages/obsidian/src/api/apis/MALAPI';
 import { MALAPIManga } from 'packages/obsidian/src/api/apis/MALAPIManga';
@@ -77,6 +78,7 @@ export default class MediaDbPlugin extends Plugin {
 		this.apiManager.registerAPI(new TMDBMovieAPI(this));
 		this.apiManager.registerAPI(new BoardGameGeekAPI(this));
 		this.apiManager.registerAPI(new OpenLibraryAPI(this));
+		this.apiManager.registerAPI(new HardcoverAPI(this));
 		this.apiManager.registerAPI(new ComicVineAPI(this));
 		this.apiManager.registerAPI(new IGDBAPI(this));
 		this.apiManager.registerAPI(new RAWGAPI(this));

@@ -14,6 +14,22 @@ Search for movies, series, anime, manga, books, comics, games, music releases, o
 
 #### Search by ID
 
+##### Hardcover
+
+Hardcover is an optional book provider, disabled by default. To use it:
+
+1. Create a free [Hardcover account](https://hardcover.app/) and obtain an API token from [account settings](https://hardcover.app/account/api).
+2. In Media DB settings, link the token using **Hardcover API token**. The token is stored in Obsidian's SecretStorage; Media DB saves only its secret identifier.
+3. Enable **HardcoverAPI** under **Book settings**. Search by title or author, or select HardcoverAPI in advanced search.
+
+For ID searches, enter the numeric Hardcover **book ID**, not an edition ID or ISBN.
+
+Imports include title, authors, original publication year, description, genres, cover, average Hardcover rating, pages, and available ISBNs. ISBNs and page count use Hardcover's default physical edition, falling back to its default ebook edition when no physical edition is set. This imports catalog metadata; it does not sync your Hardcover reading history or modify your Hardcover account.
+
+Search returns up to 20 results. Requests are spaced at least 1.1 seconds apart to respect the 60-per-minute limit. Invalid or expired tokens, insufficient permissions, and rate limits are reported without creating an entry. See [Hardcover's API documentation](https://docs.hardcover.app/api/getting-started/) for current token permissions and quotas.
+
+#### Other providers: Search by ID
+
 Allows you to search by an ID that varies from API to API. Concrete information on this feature can be found in the description of the individual APIs.
 
 #### Templates

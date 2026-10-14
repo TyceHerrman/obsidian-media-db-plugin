@@ -51,6 +51,7 @@ function createPropertyMappingsDescription(): DocumentFragment {
 // MARK: Settings
 export interface MediaDbPluginSettings {
 	OMDbKeyId: string;
+	HardcoverKeyId: string;
 	TMDBKeyId: string;
 	//MobyGamesKeyId: string;
 	//GiantBombKeyId: string;
@@ -80,6 +81,7 @@ export interface MediaDbPluginSettings {
 	MusicBrainzAPI_disabledMediaTypes: MediaType[];
 	OMDbAPI_disabledMediaTypes: MediaType[];
 	OpenLibraryAPI_disabledMediaTypes: MediaType[];
+	HardcoverAPI_disabledMediaTypes: MediaType[];
 	SteamAPI_disabledMediaTypes: MediaType[];
 	TMDBMovieAPI_disabledMediaTypes: MediaType[];
 	TMDBSeasonAPI_disabledMediaTypes: MediaType[];
@@ -310,6 +312,7 @@ class MediaTypeMappedSettings {
 // MARK: Defaults
 const DEFAULT_SETTINGS: MediaDbPluginSettings = {
 	OMDbKeyId: '',
+	HardcoverKeyId: '',
 	TMDBKeyId: '',
 	//MobyGamesKeyId: '',
 	//GiantBombKeyId: '',
@@ -339,6 +342,7 @@ const DEFAULT_SETTINGS: MediaDbPluginSettings = {
 	MusicBrainzAPI_disabledMediaTypes: [],
 	OMDbAPI_disabledMediaTypes: [],
 	OpenLibraryAPI_disabledMediaTypes: [],
+	HardcoverAPI_disabledMediaTypes: [MediaType.Book],
 	SteamAPI_disabledMediaTypes: [],
 	TMDBMovieAPI_disabledMediaTypes: [],
 	TMDBSeasonAPI_disabledMediaTypes: [],
@@ -579,6 +583,21 @@ export class MediaDbSettingTab extends PluginSettingTab {
 		// MARK: API keys
 		const apiKeyGroup = new SettingGroup(containerEl);
 		apiKeyGroup.setHeading('API Keys');
+
+		apiKeyGroup.addSetting(
+			setting =>
+				void setting
+					.setName('Hardcover API token')
+					.setDesc('API token from Hardcover account settings. Enable Hardcover in Book settings below.')
+					.addComponent(el => {
+						const component = new SecretComponent(this.app, el);
+						component.setValue(this.plugin.settings.HardcoverKeyId).onChange(data => {
+							this.plugin.settings.HardcoverKeyId = data;
+							void this.plugin.saveSettings();
+						});
+						return component;
+					}),
+		);
 
 		apiKeyGroup.addSetting(
 			setting =>
