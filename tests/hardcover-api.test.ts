@@ -7,14 +7,14 @@ import { BookModel } from 'packages/obsidian/src/models/BookModel';
 import { MDBErrorKind } from 'packages/obsidian/src/utils/MDBError';
 import { MediaType } from 'packages/obsidian/src/utils/MediaType';
 
-GlobalRegistrator.register();
+if (typeof window === 'undefined') GlobalRegistrator.register();
 const request = spyOn(obsidian, 'requestUrl');
 afterEach(() => request.mockReset());
 
 function provider(token: string | null = 'test-token'): HardcoverAPI {
 	return new HardcoverAPI({
-		app: { secretStorage: { getSecret: () => token } },
-		settings: { HardcoverKeyId: 'hardcover', HardcoverAPI_disabledMediaTypes: [MediaType.Book] },
+		hardcoverOAuth: { getAccessToken: async () => (token ? { ok: true, value: token } : { ok: false, error: { kind: MDBErrorKind.Validation, message: 'Connect first' } }) },
+		settings: { HardcoverAPI_disabledMediaTypes: [MediaType.Book] },
 	} as unknown as MediaDbPlugin);
 }
 
@@ -52,7 +52,7 @@ test('Hardcover requires a secret and does not send requests without it', async 
 });
 
 test('search uses variables, caps results and restores relevance order', async () => {
-	const api = provider('Bearer test-token');
+	const api = provider();
 	respond({ data: { search: { ids: ['456', '123', '456'] } } });
 	respond({ data: { books: [book, { ...book, id: 456, title: 'First result' }] } });
 	const result = await api.searchByTitle('title " with quotes');

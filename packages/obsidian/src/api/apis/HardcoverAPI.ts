@@ -48,7 +48,7 @@ export class HardcoverAPI extends APIModel {
 		super();
 		this.plugin = plugin;
 		this.apiName = 'HardcoverAPI';
-		this.apiDescription = 'Book metadata from Hardcover (requires a free account and API token).';
+		this.apiDescription = 'Book metadata from Hardcover (connect your free account using OAuth).';
 		this.apiUrl = 'https://api.hardcover.app/v1/graphql';
 		this.types = [MediaType.Book];
 	}
@@ -58,9 +58,9 @@ export class HardcoverAPI extends APIModel {
 	}
 
 	private async query<T>(query: string, variables: Record<string, unknown>): Promise<Result<T, MDBError>> {
-		const secret = this.plugin.app.secretStorage.getSecret(this.plugin.settings.HardcoverKeyId)?.trim();
-		if (!secret) return this.failure('API token for Hardcover missing.', MDBErrorKind.Validation);
-		const token = secret.replace(/^Bearer\s+/i, '');
+		const authorization = await this.plugin.hardcoverOAuth.getAccessToken();
+		if (!authorization.ok) return authorization;
+		const token = authorization.value;
 
 		// Reserve a slot before waiting so concurrent imports also respect the per-minute limit.
 		const now = Date.now();
@@ -80,14 +80,14 @@ export class HardcoverAPI extends APIModel {
 				body: JSON.stringify({ query, variables }),
 				throw: false,
 			});
-			if (response.status === 401) return this.failure('Hardcover API token is invalid or expired.');
-			if (response.status === 403) return this.failure('Hardcover API token does not have permission for this query.');
+			if (response.status === 401) return this.failure('Hardcover authorization is invalid or expired. Connect again in Media DB settings.');
+			if (response.status === 403) return this.failure('Hardcover authorization does not have permission for this query.');
 			if (response.status === 429) return this.failure('Hardcover rate limit reached. Please try again later.');
 			if (response.status !== 200) return this.failure(`Received status code ${response.status} from Hardcover.`);
 
 			const payload = response.json as { data?: T | null; errors?: unknown[] } | null;
 			if (!payload || payload.errors?.length || !payload.data) {
-				return this.failure('Hardcover could not complete the query. Check your token permissions and try again.');
+				return this.failure('Hardcover could not complete the query. Check your connection permissions and try again.');
 			}
 			return ok(payload.data);
 		} catch {

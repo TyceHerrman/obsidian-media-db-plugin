@@ -51,7 +51,8 @@ function createPropertyMappingsDescription(): DocumentFragment {
 // MARK: Settings
 export interface MediaDbPluginSettings {
 	OMDbKeyId: string;
-	HardcoverKeyId: string;
+	HardcoverClientId: string;
+	HardcoverOAuthSecretId: string;
 	TMDBKeyId: string;
 	//MobyGamesKeyId: string;
 	//GiantBombKeyId: string;
@@ -312,7 +313,8 @@ class MediaTypeMappedSettings {
 // MARK: Defaults
 const DEFAULT_SETTINGS: MediaDbPluginSettings = {
 	OMDbKeyId: '',
-	HardcoverKeyId: '',
+	HardcoverClientId: '',
+	HardcoverOAuthSecretId: '',
 	TMDBKeyId: '',
 	//MobyGamesKeyId: '',
 	//GiantBombKeyId: '',
@@ -587,16 +589,36 @@ export class MediaDbSettingTab extends PluginSettingTab {
 		apiKeyGroup.addSetting(
 			setting =>
 				void setting
-					.setName('Hardcover API token')
-					.setDesc('API token from Hardcover account settings. Enable Hardcover in Book settings below.')
-					.addComponent(el => {
-						const component = new SecretComponent(this.app, el);
-						component.setValue(this.plugin.settings.HardcoverKeyId).onChange(data => {
-							this.plugin.settings.HardcoverKeyId = data;
+					.setName('Hardcover OAuth client ID')
+					.setDesc(
+						'Public native-app client ID from Hardcover Developer Apps. Register obsidian://media-db-hardcover as the redirect and allow only read:catalog. No client secret is used.',
+					)
+					.addText(component => {
+						component.setValue(this.plugin.settings.HardcoverClientId).onChange(data => {
+							this.plugin.hardcoverOAuth.cancelPendingAuthorization();
+							this.plugin.settings.HardcoverClientId = data.trim();
 							void this.plugin.saveSettings();
 						});
-						return component;
 					}),
+		);
+		apiKeyGroup.addSetting(
+			setting =>
+				void setting
+					.setName('Hardcover connection')
+					.setDesc('Connect in your browser to read public book metadata. Keep this vault open until you return. Credentials are stored in SecretStorage.')
+					.addButton(button =>
+						button.setButtonText('Connect').onClick(async () => {
+							const result = await this.plugin.hardcoverOAuth.beginAuthorization();
+							if (result.ok) window.open(result.value, '_blank', 'noopener');
+							else new Notice(result.error.userMessage ?? 'Could not start Hardcover connection.');
+						}),
+					)
+					.addButton(button =>
+						button.setButtonText('Disconnect').onClick(async () => {
+							const result = await this.plugin.hardcoverOAuth.disconnect();
+							new Notice(result.ok ? 'Hardcover disconnected.' : (result.error.userMessage ?? 'Could not disconnect Hardcover.'));
+						}),
+					),
 		);
 
 		apiKeyGroup.addSetting(

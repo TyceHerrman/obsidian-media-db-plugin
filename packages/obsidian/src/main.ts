@@ -1,5 +1,5 @@
 import 'packages/obsidian/src/styles.css';
-import { Plugin, TFolder } from 'obsidian';
+import { Notice, Plugin, TFolder } from 'obsidian';
 import { APIManager } from 'packages/obsidian/src/api/APIManager';
 import { BoardGameGeekAPI } from 'packages/obsidian/src/api/apis/BoardGameGeekAPI';
 import { ComicVineAPI } from 'packages/obsidian/src/api/apis/ComicVineAPI';
@@ -17,6 +17,7 @@ import { TMDBSeasonAPI } from 'packages/obsidian/src/api/apis/TMDBSeasonAPI';
 import { TMDBSeriesAPI } from 'packages/obsidian/src/api/apis/TMDBSeriesAPI';
 import { VNDBAPI } from 'packages/obsidian/src/api/apis/VNDBAPI';
 import { WikipediaAPI } from 'packages/obsidian/src/api/apis/WikipediaAPI';
+import { HardcoverOAuth } from 'packages/obsidian/src/api/HardcoverOAuth';
 import type { LegacyApiKeyEntry } from 'packages/obsidian/src/modals/LegacyApiKeysModal';
 import { LegacyApiKeysModal } from 'packages/obsidian/src/modals/LegacyApiKeysModal';
 import { PropertyMapper } from 'packages/obsidian/src/settings/PropertyMapper';
@@ -45,6 +46,7 @@ export default class MediaDbPlugin extends Plugin {
 	bulkImportHelper!: BulkImportHelper;
 	dateFormatter!: DateFormatter;
 	errorReporter!: ErrorReporter;
+	hardcoverOAuth!: HardcoverOAuth;
 
 	async onload(): Promise<void> {
 		this.mediaTypeManager = new MediaTypeManager();
@@ -57,13 +59,21 @@ export default class MediaDbPlugin extends Plugin {
 		this.dateFormatter = new DateFormatter();
 
 		await this.loadSettings();
+		this.hardcoverOAuth = new HardcoverOAuth(this);
+		this.registerObsidianProtocolHandler('media-db-hardcover', params => {
+			void this.hardcoverOAuth.completeAuthorization(params).then(result => {
+				new Notice(result.ok ? 'Hardcover connected. You can now search for books.' : (result.error.userMessage ?? 'Hardcover connection failed.'));
+			});
+		});
 		this.registerDefaultApis();
 		this.addSettingTab(new MediaDbSettingTab(this.app, this));
 		this.registerRibbonAndFileMenu();
 		this.registerCommands();
 	}
 
-	onunload(): void {}
+	onunload(): void {
+		this.hardcoverOAuth?.cancelPendingAuthorization();
+	}
 
 	private registerDefaultApis(): void {
 		this.apiManager = new APIManager();
