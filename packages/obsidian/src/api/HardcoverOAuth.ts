@@ -38,6 +38,8 @@ export class HardcoverOAuth {
 	private pending?: PendingAuthorization;
 	private refreshing?: Promise<Result<string, MDBError>>;
 	private generation = 0;
+	private authGeneration = 0;
+	private disconnecting = false;
 
 	constructor(private plugin: MediaDbPlugin) {}
 
@@ -68,13 +70,14 @@ export class HardcoverOAuth {
 	}
 
 	async beginAuthorization(): Promise<Result<string, MDBError>> {
+		if (this.disconnecting) return this.failure('Hardcover is disconnecting. Please try again.');
 		const clientId = this.plugin.settings.HardcoverClientId.trim();
 		if (!clientId) return this.failure('Configure the public Hardcover OAuth client ID first.');
-		const generation = ++this.generation;
+		const generation = ++this.authGeneration;
 		const verifier = randomString();
 		const state = randomString();
 		const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
-		if (generation !== this.generation) return this.failure('Hardcover connection was cancelled.');
+		if (generation !== this.authGeneration) return this.failure('Hardcover connection was cancelled.');
 		this.pending = { state, verifier, clientId, expiresAt: Date.now() + 10 * 60 * 1000 };
 		const params = new URLSearchParams({
 			response_type: 'code',
@@ -89,6 +92,7 @@ export class HardcoverOAuth {
 	}
 
 	async completeAuthorization(params: Record<string, string>): Promise<Result<void, MDBError>> {
+		if (this.disconnecting) return this.failure('Hardcover is disconnecting. Please try again.');
 		const pending = this.pending;
 		if (
 			!pending ||
@@ -101,7 +105,7 @@ export class HardcoverOAuth {
 		}
 		this.pending = undefined;
 		if (params.error || !params.code) return this.failure('Hardcover sign-in was cancelled or denied.');
-		const generation = this.generation;
+		const generation = this.authGeneration;
 		const response = await this.exchange({
 			grant_type: 'authorization_code',
 			code: params.code,
@@ -110,7 +114,8 @@ export class HardcoverOAuth {
 			client_id: pending.clientId,
 		});
 		if (!response.ok) return response;
-		if (generation !== this.generation) return this.failure('Hardcover connection was cancelled.');
+		if (generation !== this.authGeneration) return this.failure('Hardcover connection was cancelled.');
+		this.generation++;
 		await this.storeTokens(response.value);
 		return ok(undefined);
 	}
@@ -152,6 +157,7 @@ export class HardcoverOAuth {
 	}
 
 	async getAccessToken(): Promise<Result<string, MDBError>> {
+		if (this.disconnecting) return this.failure('Hardcover is disconnecting. Please try again.');
 		const tokens = this.readTokens();
 		if (!tokens) return this.failure('Connect to Hardcover in Media DB settings first.');
 		if (tokens.expiresAt > Date.now() + 60_000) return ok(tokens.accessToken);
@@ -167,39 +173,48 @@ export class HardcoverOAuth {
 	private async refreshTokens(tokens: Tokens, generation: number): Promise<Result<string, MDBError>> {
 		const result = await this.exchange({ grant_type: 'refresh_token', refresh_token: tokens.refreshToken, client_id: tokens.clientId });
 		if (!result.ok) return result;
-		if (generation !== this.generation || tokens.clientId !== this.plugin.settings.HardcoverClientId.trim())
-			return this.failure('Hardcover connection changed. Connect again.');
+		if (generation !== this.generation || this.readTokens(false)?.refreshToken !== tokens.refreshToken) return this.failure('Hardcover connection changed. Connect again.');
+		// Preserve rotated credentials even if settings currently select another client.
 		await this.storeTokens(result.value);
+		if (tokens.clientId !== this.plugin.settings.HardcoverClientId.trim()) return this.failure('Hardcover connection changed.');
 		return ok(result.value.accessToken);
 	}
 
 	async disconnect(): Promise<Result<void, MDBError>> {
-		this.pending = undefined;
-		this.generation++;
-		const tokens = this.readTokens(false);
-		if (tokens) {
-			try {
-				const response = await requestUrl({
-					url: `${ISSUER}/oauth2/revoke`,
-					method: 'POST',
-					contentType: 'application/x-www-form-urlencoded',
-					body: new URLSearchParams({ token: tokens.refreshToken, token_type_hint: 'refresh_token', client_id: tokens.clientId }).toString(),
-					throw: false,
-				});
-				if (response.status !== 200) return this.failure('Hardcover could not revoke the connection. Please try Disconnect again.');
-			} catch {
-				return this.failure('Hardcover could not revoke the connection. Please try Disconnect again.');
+		if (this.disconnecting) return this.failure('Hardcover is already disconnecting.');
+		this.disconnecting = true;
+		try {
+			this.cancelPendingAuthorization();
+			// Finish rotation before revoking, so Disconnect uses the current refresh token.
+			await this.refreshing;
+			this.generation++;
+			const tokens = this.readTokens(false);
+			if (tokens) {
+				try {
+					const response = await requestUrl({
+						url: `${ISSUER}/oauth2/revoke`,
+						method: 'POST',
+						contentType: 'application/x-www-form-urlencoded',
+						body: new URLSearchParams({ token: tokens.refreshToken, token_type_hint: 'refresh_token', client_id: tokens.clientId }).toString(),
+						throw: false,
+					});
+					if (response.status !== 200) return this.failure('Hardcover could not revoke the connection. Please try Disconnect again.');
+				} catch {
+					return this.failure('Hardcover could not revoke the connection. Please try Disconnect again.');
+				}
 			}
+			const id = this.plugin.settings.HardcoverOAuthSecretId;
+			if (id) this.plugin.app.secretStorage.setSecret(id, '');
+			this.plugin.settings.HardcoverOAuthSecretId = '';
+			await this.plugin.saveSettings();
+			return ok(undefined);
+		} finally {
+			this.disconnecting = false;
 		}
-		const id = this.plugin.settings.HardcoverOAuthSecretId;
-		if (id) this.plugin.app.secretStorage.setSecret(id, '');
-		this.plugin.settings.HardcoverOAuthSecretId = '';
-		await this.plugin.saveSettings();
-		return ok(undefined);
 	}
 
 	cancelPendingAuthorization(): void {
 		this.pending = undefined;
-		this.generation++;
+		this.authGeneration++;
 	}
 }

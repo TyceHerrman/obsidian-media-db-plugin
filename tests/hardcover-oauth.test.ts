@@ -145,3 +145,121 @@ test('changing the client or unloading cancels pending sign-in', async () => {
 	expect((await oauth.completeAuthorization(params)).ok).toBe(false);
 	expect(request).not.toHaveBeenCalled();
 });
+
+async function connectedWithExpiredTokens() {
+	const context = setup();
+	const params = await callback(context.oauth);
+	respond(tokens);
+	await context.oauth.completeAuthorization(params);
+	const read = () => JSON.parse(context.secrets.get(context.settings.HardcoverOAuthSecretId)!);
+	context.secrets.set(context.settings.HardcoverOAuthSecretId, JSON.stringify({ ...read(), expiresAt: 0 }));
+	return { ...context, read };
+}
+
+function delayedRefresh() {
+	let finish!: (value: obsidian.RequestUrlResponse) => void;
+	request.mockImplementationOnce(
+		() =>
+			new Promise<obsidian.RequestUrlResponse>(resolve => {
+				finish = resolve;
+			}) as obsidian.RequestUrlResponsePromise,
+	);
+	return () => finish({ status: 200, json: { ...tokens, access_token: 'rotated-access', refresh_token: 'rotated-refresh' } } as obsidian.RequestUrlResponse);
+}
+
+test('canceling sign-in or starting a new sign-in does not discard an in-flight rotation', async () => {
+	for (const startAgain of [false, true]) {
+		const { oauth, read } = await connectedWithExpiredTokens();
+		const finish = delayedRefresh();
+		const refresh = oauth.getAccessToken();
+		oauth.cancelPendingAuthorization();
+		if (startAgain) await oauth.beginAuthorization();
+		finish();
+		expect((await refresh).ok).toBe(true);
+		expect(read().refreshToken).toBe('rotated-refresh');
+	}
+});
+
+test('client edits preserve rotated credentials without returning a token for the wrong client', async () => {
+	const { oauth, settings, read } = await connectedWithExpiredTokens();
+	const finish = delayedRefresh();
+	const refresh = oauth.getAccessToken();
+	oauth.cancelPendingAuthorization();
+	settings.HardcoverClientId = 'other-client';
+	finish();
+	expect((await refresh).ok).toBe(false);
+	expect(read().refreshToken).toBe('rotated-refresh');
+	expect(oauth.isConnected()).toBe(false);
+	settings.HardcoverClientId = 'test-client';
+	expect(await oauth.getAccessToken()).toEqual({ ok: true, value: 'rotated-access' });
+});
+
+test('an old refresh cannot overwrite a newly authorized connection', async () => {
+	const { oauth, read } = await connectedWithExpiredTokens();
+	const finish = delayedRefresh();
+	const refresh = oauth.getAccessToken();
+	const params = await callback(oauth);
+	respond({ ...tokens, access_token: 'new-connection-access', refresh_token: 'new-connection-refresh' });
+	expect((await oauth.completeAuthorization(params)).ok).toBe(true);
+	finish();
+	expect((await refresh).ok).toBe(false);
+	expect(read().refreshToken).toBe('new-connection-refresh');
+});
+
+test('disconnect waits for rotation, revokes the rotated token and blocks new connections', async () => {
+	const { oauth, secrets } = await connectedWithExpiredTokens();
+	const finish = delayedRefresh();
+	const refresh = oauth.getAccessToken();
+	const params = await callback(oauth);
+	const disconnect = oauth.disconnect();
+	expect((await oauth.beginAuthorization()).ok).toBe(false);
+	expect((await oauth.completeAuthorization(params)).ok).toBe(false);
+	expect((await oauth.getAccessToken()).ok).toBe(false);
+	respond({});
+	finish();
+	await refresh;
+	expect((await disconnect).ok).toBe(true);
+	const revoke = request.mock.calls.at(-1)![0] as obsidian.RequestUrlParam;
+	expect(new URLSearchParams(revoke.body as string).get('token')).toBe('rotated-refresh');
+	expect(oauth.isConnected()).toBe(false);
+	expect([...secrets.values()]).toEqual(['']);
+});
+
+test('canceling authorization during its exchange prevents credentials from being stored', async () => {
+	const { oauth, secrets } = setup();
+	const params = await callback(oauth);
+	const finish = delayedRefresh();
+	const connection = oauth.completeAuthorization(params);
+	oauth.cancelPendingAuthorization();
+	finish();
+	expect((await connection).ok).toBe(false);
+	expect(secrets.size).toBe(0);
+});
+
+test('failed disconnect after rotation retains the current credentials for retry', async () => {
+	const { oauth, read } = await connectedWithExpiredTokens();
+	const finish = delayedRefresh();
+	const refresh = oauth.getAccessToken();
+	const disconnect = oauth.disconnect();
+	respond({}, 503);
+	finish();
+	await refresh;
+	expect((await disconnect).ok).toBe(false);
+	expect(read().refreshToken).toBe('rotated-refresh');
+	expect(oauth.isConnected()).toBe(true);
+	respond({});
+	expect((await oauth.disconnect()).ok).toBe(true);
+	const retry = request.mock.calls.at(-1)![0] as obsidian.RequestUrlParam;
+	expect(new URLSearchParams(retry.body as string).get('token')).toBe('rotated-refresh');
+});
+
+test('disconnect prevents an authorization exchange already in flight from restoring credentials', async () => {
+	const { oauth, secrets } = setup();
+	const params = await callback(oauth);
+	const finish = delayedRefresh();
+	const connection = oauth.completeAuthorization(params);
+	expect((await oauth.disconnect()).ok).toBe(true);
+	finish();
+	expect((await connection).ok).toBe(false);
+	expect(secrets.size).toBe(0);
+});
